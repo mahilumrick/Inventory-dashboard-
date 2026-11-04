@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Inventory Dashboard</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;font-family:system-ui,sans-serif;background:#f3f4f6;color:#111827}
+header{background:#1d4ed8;color:#fff;padding:16px 24px;font-size:20px;font-weight:600}
+main{max-width:1000px;margin:0 auto;padding:20px}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:20px}
+.card{background:#fff;border-radius:10px;padding:16px;box-shadow:0 1px 3px #0001}
+.card small{color:#6b7280}.card h2{margin:6px 0 0;font-size:26px}
+.panel{background:#fff;border-radius:10px;padding:16px;box-shadow:0 1px 3px #0001;margin-bottom:20px}
+form{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px}
+input{padding:10px;border:1px solid #d1d5db;border-radius:6px;font-size:14px;width:100%}
+button{padding:10px 14px;border:0;border-radius:6px;cursor:pointer;font-size:14px;background:#1d4ed8;color:#fff}
+button.gray{background:#6b7280}button.red{background:#dc2626}button.green{background:#059669}
+.bar{display:flex;gap:10px;margin-bottom:12px}
+.tablewrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse;min-width:560px}
+th,td{padding:10px;text-align:left;border-bottom:1px solid #e5e7eb;font-size:14px}
+th{background:#f9fafb}
+.low{color:#dc2626;font-weight:600}
+td button{padding:6px 10px;margin-right:4px}
+</style>
+</head>
+<body>
+<header>📦 Inventory Dashboard</header>
+<main>
+  <div class="cards">
+    <div class="card"><small>Total Items</small><h2 id="sItems">0</h2></div>
+    <div class="card"><small>Total Quantity</small><h2 id="sQty">0</h2></div>
+    <div class="card"><small>Total Value</small><h2 id="sVal">₱0</h2></div>
+    <div class="card"><small>Low Stock (≤5)</small><h2 id="sLow">0</h2></div>
+  </div>
+
+  <div class="panel">
+    <h3 id="formTitle" style="margin-top:0">Add Item</h3>
+    <form id="form">
+      <input id="name" placeholder="Name" required>
+      <input id="category" placeholder="Category" required>
+      <input id="quantity" type="number" min="0" placeholder="Quantity" required>
+      <input id="price" type="number" min="0" step="0.01" placeholder="Price" required>
+      <button type="submit" id="saveBtn">Add</button>
+      <button type="button" class="gray" id="cancelBtn" style="display:none">Cancel</button>
+    </form>
+  </div>
+
+  <div class="panel">
+    <div class="bar"><input id="search" placeholder="Search name or category..."></div>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>ID</th><th>Name</th><th>Category</th><th>Qty</th><th>Price</th><th>Actions</th></tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+  </div>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let editId = null;
+const peso = (n) => '₱' + Number(n).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
+const esc = (s) => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+async function loadStats() {
+  const s = await (await fetch('/api/stats')).json();
+  $('sItems').textContent = s.totalItems;
+  $('sQty').textContent = s.totalQuantity;
+  $('sVal').textContent = peso(s.totalValue);
+  $('sLow').textContent = s.lowStock;
+}
+
+async function loadItems() {
+  const items = await (await fetch('/api/items?search=' + encodeURIComponent($('search').value))).json();
+  $('rows').innerHTML = items.map(i => `
+    <tr>
+      <td>${i.id}</td><td>${esc(i.name)}</td><td>${esc(i.category)}</td>
+      <td class="${i.quantity <= 5 ? 'low' : ''}">${i.quantity}</td>
+      <td>${peso(i.price)}</td>
+      <td>
+        <button class="green" onclick='startEdit(${JSON.stringify(i)})'>Edit</button>
+        <button class="red" onclick="del(${i.id})">Delete</button>
+      </td>
+    </tr>`).join('') || '<tr><td colspan="6">No items found.</td></tr>';
+}
+
+const refresh = () => Promise.all([loadItems(), loadStats()]);
+
+function resetForm() {
+  editId = null;
+  $('form').reset();
+  $('formTitle').textContent = 'Add Item';
+  $('saveBtn').textContent = 'Add';
+  $('cancelBtn').style.display = 'none';
+}
+
+function startEdit(i) {
+  editId = i.id;
+  $('name').value = i.name; $('category').value = i.category;
+  $('quantity').value = i.quantity; $('price').value = i.price;
+  $('formTitle').textContent = 'Edit Item #' + i.id;
+  $('saveBtn').textContent = 'Update';
+  $('cancelBtn').style.display = '';
+  window.scrollTo({top:0, behavior:'smooth'});
+}
+
+async function del(id) {
+  if (!confirm('Delete this item?')) return;
+  await fetch('/api/items/' + id, { method: 'DELETE' });
+  refresh();
+}
+
+$('form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const body = {
+    name: $('name').value, category: $('category').value,
+    quantity: $('quantity').value, price: $('price').value
+  };
+  const res = await fetch(editId ? '/api/items/' + editId : '/api/items', {
+    method: editId ? 'PUT' : 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(body)
+  });
+  if (!res.ok) return alert('Invalid input');
+  resetForm(); refresh();
+});
+
+$('cancelBtn').addEventListener('click', resetForm);
+$('search').addEventListener('input', loadItems);
+refresh();
+</script>
+</body>
+</html>
